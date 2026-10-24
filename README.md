@@ -5,7 +5,7 @@ Do these in the same folder as the project files:
 
 Required:
 Install SDK from:
-[.NET 8.0 SDK](`https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/sdk-8.0.426-windows-x64-installer)
+[.NET 8.0 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/sdk-8.0.426-windows-x64-installer)
 
 To UseSimply run:
 `dotnet build`
