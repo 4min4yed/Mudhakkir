@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using Microsoft.Win32;
 using System.Windows.Forms;
 
 namespace Mudhakkir;
@@ -16,12 +17,17 @@ internal sealed class ReminderForm : Form
     static readonly Color Ink = Color.FromArgb(39, 52, 45), Green = Color.FromArgb(67, 103, 79),
         GreenLight = Color.FromArgb(229, 237, 226), Paper = Color.FromArgb(247, 246, 240),
         Card = Color.FromArgb(255, 254, 250), Muted = Color.FromArgb(112, 120, 111), Border = Color.FromArgb(224, 224, 215);
+    static readonly Color DarkInk = Color.FromArgb(235, 238, 233), DarkPaper = Color.FromArgb(29, 34, 31),
+        DarkCard = Color.FromArgb(40, 47, 43), DarkGreenLight = Color.FromArgb(54, 70, 58),
+        DarkMuted = Color.FromArgb(180, 190, 182), DarkBorder = Color.FromArgb(78, 88, 81);
     const string RLM = "\u200F";
+    const string StartupValueName = "Mudhakkir";
     readonly NotifyIcon tray;
     readonly System.Windows.Forms.Timer reminderTimer = new(), countdownTimer = new() { Interval = 1000 };
     readonly ModernSlider intervalSlider, popupDurationSlider;
     readonly Label intervalValue, popupDurationValue, status, nextReminder;
-    readonly Button messagePicker, startButton, stopButton, hideButton, saveCustomButton;
+    readonly Button messagePicker, startButton, stopButton, hideButton, saveCustomButton, themeButton;
+    readonly CheckBox startupCheck;
     readonly Panel customPanel, popupDurationPanel;
     readonly TextBox customText;
     readonly RadioButton popupMode, balloonMode;
@@ -40,12 +46,13 @@ internal sealed class ReminderForm : Form
     int lastMessage = -1, secondsRemaining;
     readonly Random random = new();
     PopupForm? activePopup;
+    bool darkMode;
 
     public ReminderForm()
     {
         selectedMessage = messages[0];
         Text = "Mudhakkir | مُذَكِّر";
-        StartPosition = FormStartPosition.CenterScreen; Size = new Size(720, 820); MinimumSize = new Size(680, 760);
+        StartPosition = FormStartPosition.CenterScreen; Size = new Size(720, 900); MinimumSize = new Size(680, 840);
         BackColor = Paper; ForeColor = Ink; Font = new Font("Segoe UI", 10); RightToLeft = RightToLeft.Yes; RightToLeftLayout = false;
         FormBorderStyle = FormBorderStyle.FixedSingle; MaximizeBox = false; DoubleBuffered = true;
 
@@ -61,17 +68,19 @@ internal sealed class ReminderForm : Form
 
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(22), BackColor = Paper, RightToLeft = RightToLeft.No };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 220)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 125)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 200)); Controls.Add(root);
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 220)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 125)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 220)); Controls.Add(root);
 
         var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = Paper, RightToLeft = RightToLeft.No };
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 288));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 340));
         var brand = new Panel { Dock = DockStyle.Fill, BackColor = Paper, RightToLeft = RightToLeft.No };
         brand.Controls.Add(new Label { Text = "❧", Font = new Font("Segoe UI Symbol", 27), ForeColor = Green, AutoSize = true, Location = new Point(0, 2) });
         brand.Controls.Add(new Label { Text = RLM + "مُذَكِّر" + RLM, Font = new Font("Segoe UI", 23, FontStyle.Bold), ForeColor = Ink, AutoSize = true, Location = new Point(72, 0), RightToLeft = RightToLeft.Yes });
         brand.Controls.Add(new Label { Text = RLM + "انْشَغِلْ بِعَمَلِكَ، وَلَا تَنْسَ رَبَّك" + RLM, Font = new Font("Segoe UI", 9), ForeColor = Muted, AutoSize = false, Size = new Size(230, 24), Location = new Point(72, 57), TextAlign = ContentAlignment.MiddleRight, RightToLeft = RightToLeft.Yes });
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(0, 10, 0, 0), BackColor = Paper };
         startButton = Button("▶ بدء", Green, Color.White, 82); stopButton = Button("Ⅱ إيقاف", Color.FromArgb(233, 233, 224), Ink, 88); hideButton = Button("— إخفاء", Color.FromArgb(233, 233, 224), Ink, 88);
-        startButton.Click += StartButton_Click; stopButton.Click += StopButton_Click; hideButton.Click += (_, _) => HideToTray(); actions.Controls.AddRange(new Control[] { hideButton, stopButton, startButton });
+        themeButton = Button("☾", Color.FromArgb(233, 233, 224), Ink, 38); themeButton.AccessibleName = "تبديل الوضع الداكن";
+        startButton.Click += StartButton_Click; stopButton.Click += StopButton_Click; hideButton.Click += (_, _) => HideToTray(); themeButton.Click += (_, _) => ToggleTheme();
+        actions.Controls.AddRange(new Control[] { themeButton, hideButton, stopButton, startButton });
         header.Controls.Add(brand, 0, 0); header.Controls.Add(actions, 1, 0); root.Controls.Add(header, 0, 0);
 
         var intro = CardPanel(); intro.Controls.Add(Section("الَّذِينَ آمَنُوا وَتَطْمَئِنُّ قُلُوبُهُم بِذِكْرِ اللَّهِ ۗ أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ     ", 18, 8));
@@ -106,16 +115,108 @@ internal sealed class ReminderForm : Form
         popupDurationPanel.Controls.AddRange(new Control[] { popupDurationValue, popupDurationSlider });
         status = new Label { Text = "الحالة: متوقف", AutoSize = false, Width = 150, Height = 30, Location = new Point(20, 150), ForeColor = Green, Font = new Font("Segoe UI", 9, FontStyle.Bold), TextAlign = ContentAlignment.MiddleRight, RightToLeft = RightToLeft.Yes };
         nextReminder = new Label { Text = "ابدأ لتفعيل التذكيرات.", AutoSize = false, Width = 420, Height = 30, Location = new Point(185, 150), ForeColor = Muted, TextAlign = ContentAlignment.MiddleRight, RightToLeft = RightToLeft.Yes };
-        options.Controls.AddRange(new Control[] { popupMode, balloonMode, popupDurationPanel, status, nextReminder }); root.Controls.Add(options, 0, 4);
-        UpdatePickerText(); UpdateStatus(); UpdateButtonState(); FormClosing += OnFormClosing;
+        startupCheck = new CheckBox { Text = "تشغيل مع بدء Windows", AutoSize = true, Location = new Point(20, 178), RightToLeft = RightToLeft.Yes, ForeColor = Ink, Checked = IsStartupEnabled() };
+        startupCheck.CheckedChanged += StartupCheck_CheckedChanged;
+        options.Controls.AddRange(new Control[] { popupMode, balloonMode, popupDurationPanel, status, nextReminder, startupCheck }); root.Controls.Add(options, 0, 4);
+        UpdatePickerText(); UpdateStatus(); UpdateButtonState(); ApplyTheme(); FormClosing += OnFormClosing;
     }
 
     Panel CardPanel()
     {
-        var p = new Panel { Dock = DockStyle.Fill, BackColor = Card, Padding = new Padding(16), Margin = new Padding(0, 5, 0, 5), RightToLeft = RightToLeft.No };
+        var p = new Panel { Dock = DockStyle.Fill, BackColor = Card, Padding = new Padding(16), Margin = new Padding(0, 5, 0, 5), RightToLeft = RightToLeft.No, Tag = "card" };
         p.Paint += (_, e) => { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; using var pen = new Pen(Border); var r = p.ClientRectangle; r.Width--; r.Height--; e.Graphics.DrawRoundedRectangle(pen, r, 13); };
         return p;
     }
+    void ToggleTheme()
+    {
+        darkMode = !darkMode;
+        ApplyTheme();
+        activePopup?.ApplyTheme(darkMode);
+    }
+    void ApplyTheme()
+    {
+        var paper = darkMode ? DarkPaper : Paper;
+        var ink = darkMode ? DarkInk : Ink;
+        var card = darkMode ? DarkCard : Card;
+        var muted = darkMode ? DarkMuted : Muted;
+        var border = darkMode ? DarkBorder : Border;
+        BackColor = paper;
+        ForeColor = ink;
+        ApplyThemeToControls(Controls, paper, ink, card, muted, border);
+        messageMenu.BackColor = card;
+        messageMenu.ForeColor = ink;
+        themeButton.Text = darkMode ? "☀" : "☾";
+        themeButton.BackColor = darkMode ? DarkGreenLight : Color.FromArgb(233, 233, 224);
+        themeButton.ForeColor = darkMode ? DarkInk : Ink;
+        intervalSlider.SetTheme(darkMode);
+        popupDurationSlider.SetTheme(darkMode);
+    }
+    void ApplyThemeToControls(Control.ControlCollection controls, Color paper, Color ink, Color card, Color muted, Color border)
+    {
+        foreach (Control control in controls)
+        {
+            control.BackColor = control.Tag as string == "card" || control == customPanel ? card : paper;
+            if (control is Label label)
+                label.ForeColor = label == status || label == intervalValue || label == popupDurationValue ? (darkMode ? Color.FromArgb(126, 190, 143) : Green) : (label == nextReminder ? muted : ink);
+            else if (control is TextBox)
+            {
+                control.BackColor = card;
+                control.ForeColor = ink;
+            }
+            else if (control is RadioButton radio)
+            {
+                radio.BackColor = card;
+                radio.ForeColor = ink;
+            }
+            else if (control is CheckBox check)
+            {
+                check.BackColor = card;
+                check.ForeColor = ink;
+            }
+            else if (control is Button button && button != startButton && button != stopButton && button != hideButton && button != themeButton && button != saveCustomButton)
+            {
+                button.BackColor = darkMode ? DarkGreenLight : Color.FromArgb(244, 244, 237);
+                button.ForeColor = ink;
+                button.FlatAppearance.BorderColor = border;
+            }
+            else if (control is Panel panel && panel == popupDurationPanel)
+                panel.BackColor = darkMode ? DarkGreenLight : GreenLight;
+            if (control is Control container && container.HasChildren)
+                ApplyThemeToControls(container.Controls, paper, ink, card, muted, border);
+        }
+        UpdateButtonState();
+    }
+    bool IsStartupEnabled()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false);
+        return key?.GetValue(StartupValueName) is string;
+    }
+    void SetStartup(bool enabled)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true)
+                ?? Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+            if (key is null) throw new InvalidOperationException("Unable to open the Windows startup registry key.");
+            if (enabled) key.SetValue(StartupValueName, $"\"{Application.ExecutablePath}\"");
+            else key.DeleteValue(StartupValueName, false);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            startupCheck.CheckedChanged -= StartupCheck_CheckedChanged;
+            startupCheck.Checked = !enabled;
+            startupCheck.CheckedChanged += StartupCheck_CheckedChanged;
+            MessageBox.Show($"تعذر تحديث التشغيل مع بدء Windows:\n{ex.Message}", "مُذَكِّر", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        catch (System.IO.IOException ex)
+        {
+            startupCheck.CheckedChanged -= StartupCheck_CheckedChanged;
+            startupCheck.Checked = !enabled;
+            startupCheck.CheckedChanged += StartupCheck_CheckedChanged;
+            MessageBox.Show($"تعذر تحديث التشغيل مع بدء Windows:\n{ex.Message}", "مُذَكِّر", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+    void StartupCheck_CheckedChanged(object? sender, EventArgs e) => SetStartup(startupCheck.Checked);
     void BuildMessageMenu()
     {
         messageMenu.Items.Clear();
@@ -205,7 +306,7 @@ internal sealed class ReminderForm : Form
     }
     void StopReminders() { reminderTimer.Stop(); countdownTimer.Stop(); secondsRemaining = 0; UpdateStatus(); UpdateButtonState(); }
     string NextMessage() { if (customMode) return string.IsNullOrWhiteSpace(customText.Text) ?  " " : customText.Text.Trim(); if (!shuffleMode) return selectedMessage; int i; do { i = random.Next(messages.Length); } while (messages.Length > 1 && i == lastMessage); lastMessage = i; return messages[i]; }
-    void ShowReminder() { secondsRemaining = intervalSlider.Value * 60; string msg = NextMessage(); if (balloonMode.Checked) { tray.BalloonTipTitle = RLM + "مُذَكِّر" + RLM; tray.BalloonTipText = RLM + msg + RLM; tray.BalloonTipIcon = ToolTipIcon.Info; tray.ShowBalloonTip(5000); } else { activePopup?.Close(); activePopup = new PopupForm(msg, Green, Paper, Ink, popupDurationSlider.Value); activePopup.Show(); } UpdateStatus(); }
+    void ShowReminder() { secondsRemaining = intervalSlider.Value * 60; string msg = NextMessage(); if (balloonMode.Checked) { tray.BalloonTipTitle = RLM + "مُذَكِّر" + RLM; tray.BalloonTipText = RLM + msg + RLM; tray.BalloonTipIcon = ToolTipIcon.Info; tray.ShowBalloonTip(5000); } else { activePopup?.Close(); activePopup = new PopupForm(msg, Green, Paper, Ink, popupDurationSlider.Value, darkMode); activePopup.Show(); } UpdateStatus(); }
     void UpdateStatus() { status.Text = RLM + (reminderTimer.Enabled ? "الحالة: يعمل" : "الحالة: متوقف") + RLM; nextReminder.Text = RLM + (reminderTimer.Enabled ? $"التذكير التالي خلال {Math.Max(0, secondsRemaining) / 60:D2}:{Math.Max(0, secondsRemaining) % 60:D2}" : "ابدأ لتفعيل التذكيرات.") + RLM; UpdateButtonState(); }
     void HideToTray() { Hide(); ShowInTaskbar = false; tray.ShowBalloonTip(1500, RLM + "مُذَكِّر" + RLM, RLM + "التطبيق يعمل في الخلفية. افتح الإعدادات من أيقونة منطقة النظام." + RLM, ToolTipIcon.Info); }
     void RestoreWindow() { Show(); ShowInTaskbar = true; WindowState = FormWindowState.Normal; Activate(); }
@@ -256,6 +357,7 @@ internal sealed class SavedMessageRow : UserControl
 internal sealed class ModernSlider : Control
 {
     int value;
+    bool darkMode;
     public int Minimum { get; set; } = 0;
     public int Maximum { get; set; } = 100;
     public int Value
@@ -272,6 +374,12 @@ internal sealed class ModernSlider : Control
     }
     public event EventHandler? ValueChanged;
 
+    public void SetTheme(bool dark)
+    {
+        darkMode = dark;
+        Invalidate();
+    }
+
     public ModernSlider()
     {
         SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
@@ -285,8 +393,8 @@ internal sealed class ModernSlider : Control
         base.OnPaint(e);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         var track = new Rectangle(8, (Height - 6) / 2, Math.Max(1, Width - 16), 6);
-        using var trackBrush = new SolidBrush(Color.FromArgb(218, 224, 216));
-        using var fillBrush = new SolidBrush(Color.FromArgb(67, 103, 79));
+        using var trackBrush = new SolidBrush(darkMode ? Color.FromArgb(76, 87, 80) : Color.FromArgb(218, 224, 216));
+        using var fillBrush = new SolidBrush(darkMode ? Color.FromArgb(116, 170, 129) : Color.FromArgb(67, 103, 79));
         e.Graphics.FillRoundedRectangle(trackBrush, track, 3);
         var ratio = Maximum == Minimum ? 0 : (Value - Minimum) / (float)(Maximum - Minimum);
         var position = track.X + (int)(track.Width * ratio);
@@ -323,19 +431,37 @@ internal sealed class ModernSlider : Control
 internal sealed class PopupForm : Form
 {
     readonly System.Windows.Forms.Timer animation = new() { Interval = 25 };
+    readonly Panel stripe, top;
+    readonly Label title, body;
+    readonly Button close;
     readonly int visibleTicks; bool fading; int held;
-    public PopupForm(string message, Color green, Color paper, Color ink, int seconds)
+    public PopupForm(string message, Color green, Color paper, Color ink, int seconds, bool darkMode)
     {
         visibleTicks = seconds * 40; FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual; Size = new Size(390, 150); BackColor = paper; Opacity = 0; RightToLeft = RightToLeft.Yes; RightToLeftLayout = true;
         var screen = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 800); Location = new Point(screen.Right - Width - 24, screen.Bottom - Height - 24);
-        var stripe = new Panel { Dock = DockStyle.Right, Width = 6, BackColor = green };
-        var title = new Label { Text = "مُذَكِّر  ❧", AutoSize = false, Height = 42, Dock = DockStyle.Top, Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = green, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(12, 0, 16, 0), RightToLeft = RightToLeft.Yes };
-        var body = new Label { Text = "\u200F" + message + "\u200F", Dock = DockStyle.Fill, Font = new Font("Segoe UI", 11), ForeColor = ink, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(16, 4, 18, 10), RightToLeft = RightToLeft.Yes };
-        var close = new Button { Text = "×", Width = 34, Height = 32, Dock = DockStyle.Left, FlatStyle = FlatStyle.Flat, BackColor = paper, ForeColor = Color.Gray }; close.FlatAppearance.BorderSize = 0; close.Click += (_, _) => fading = true;
-        var top = new Panel { Dock = DockStyle.Top, Height = 42, BackColor = paper }; top.Controls.Add(title); top.Controls.Add(close); Controls.Add(body); Controls.Add(top); Controls.Add(stripe);
+        stripe = new Panel { Dock = DockStyle.Right, Width = 6, BackColor = green };
+        title = new Label { Text = "مُذَكِّر  ❧", AutoSize = false, Height = 42, Dock = DockStyle.Top, Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = green, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(12, 0, 16, 0), RightToLeft = RightToLeft.Yes };
+        body = new Label { Text = "\u200F" + message + "\u200F", Dock = DockStyle.Fill, Font = new Font("Segoe UI", 11), ForeColor = ink, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(16, 4, 18, 10), RightToLeft = RightToLeft.Yes };
+        close = new Button { Text = "×", Width = 34, Height = 32, Dock = DockStyle.Left, FlatStyle = FlatStyle.Flat, BackColor = paper, ForeColor = Color.Gray }; close.FlatAppearance.BorderSize = 0; close.Click += (_, _) => fading = true;
+        top = new Panel { Dock = DockStyle.Top, Height = 42, BackColor = paper }; top.Controls.Add(title); top.Controls.Add(close); Controls.Add(body); Controls.Add(top); Controls.Add(stripe);
+        ApplyTheme(darkMode);
         Paint += (_, e) => { using var pen = new Pen(Color.FromArgb(215, 212, 201)); e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1); };
         animation.Tick += (_, _) => { if (fading) { Opacity = Math.Max(0, Opacity - .08); if (Opacity <= 0) { animation.Stop(); Close(); } } else if (Opacity < .88) Opacity = Math.Min(.88, Opacity + .12); else if (++held >= visibleTicks) fading = true; };
         FormClosed += (_, _) => animation.Dispose(); Shown += (_, _) => animation.Start();
+    }
+    public void ApplyTheme(bool dark)
+    {
+        var paper = dark ? Color.FromArgb(29, 34, 31) : Color.FromArgb(247, 246, 240);
+        var ink = dark ? Color.FromArgb(235, 238, 233) : Color.FromArgb(39, 52, 45);
+        var green = dark ? Color.FromArgb(126, 190, 143) : Color.FromArgb(67, 103, 79);
+        BackColor = paper;
+        top.BackColor = paper;
+        close.BackColor = paper;
+        close.ForeColor = dark ? Color.FromArgb(190, 198, 191) : Color.Gray;
+        title.ForeColor = green;
+        body.ForeColor = ink;
+        stripe.BackColor = green;
+        Invalidate();
     }
 }
 
