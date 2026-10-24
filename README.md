@@ -7,7 +7,7 @@
 ##### Download the .exe directly:
 [Here](https://mohamedaminayedportfolio.netlify.app/assets/Mudhakkir.rar)
 
-##### Built it yourself
+##### Or built it yourself:
 Required:
 Install SDK from:
 [.NET 8.0 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/sdk-8.0.426-windows-x64-installer)
